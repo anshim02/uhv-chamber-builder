@@ -1,177 +1,215 @@
 import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Environment, Text } from '@react-three/drei';
+import { OrbitControls, Html, Environment } from '@react-three/drei';
 
-// Helper component to render ConFlat (CF) Flanges on port ends
+// Helper for ConFlat Flanges
 function CFFlange({ position = [0, 0, 0], rotation = [0, 0, 0], radius = 0.085, thickness = 0.018 }) {
   return (
     <group position={position} rotation={rotation}>
-      {/* Outer Flange Ring */}
       <mesh>
         <cylinderGeometry args={[radius, radius, thickness, 32]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.1} />
-      </mesh>
-      {/* Inner Raised Knife-edge Rim */}
-      <mesh position={[0, thickness / 2 + 0.001, 0]}>
-        <cylinderGeometry args={[radius * 0.75, radius * 0.75, 0.003, 32]} />
-        <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.15} />
+        <meshStandardMaterial color="#cbd5e1" metalness={0.95} roughness={0.15} />
       </mesh>
     </group>
   );
 }
 
 export default function UHVBuilder() {
-  const [manipulatorPos, setManipulatorPos] = useState(0.43); // 43cm max travel
+  const [manipulatorPos, setManipulatorPos] = useState(0.43);
+  const [selectedPart, setSelectedPart] = useState('Main Chamber Body');
 
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', fontFamily: 'sans-serif' }}>
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#f1f5f9', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       
-      {/* Top Floating Control Bar */}
+      {/* Top Navigation / Title Bar */}
       <div style={{
-        position: 'absolute', top: '16px', left: '16px', right: '16px', zIndex: 10,
-        backgroundColor: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-        border: '1px solid #334155', borderRadius: '12px', padding: '16px 24px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white'
+        height: '70px', backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', zIndex: 10
       }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>UHV Chamber: Configuration 1</h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
-            Main Body: 56.5 cm L × 14 cm D | Total w/ Gate Valve: 63.5 cm | Stroke: 43 cm
-          </p>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>UHV Chamber 3D Builder</h2>
+          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>Configuration 1: Applied Physics Lab Setup</p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <label style={{ fontSize: '14px', color: '#cbd5e1' }}>Manipulator Position:</label>
-          <input 
-            type="range" min="0" max="0.43" step="0.005" 
-            value={manipulatorPos} 
-            onChange={(e) => setManipulatorPos(parseFloat(e.target.value))}
-            style={{ width: '200px', cursor: 'pointer' }}
-          />
-          <span style={{ fontFamily: 'monospace', color: '#38bdf8', fontWeight: 'bold', width: '60px' }}>
-            {(manipulatorPos * 100).toFixed(1)} cm
-          </span>
+        {/* Live Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#f8fafc', padding: '8px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155' }}>Manipulator Stroke:</span>
+            <input 
+              type="range" min="0" max="0.43" step="0.005" 
+              value={manipulatorPos} 
+              onChange={(e) => setManipulatorPos(parseFloat(e.target.value))}
+              style={{ width: '150px', cursor: 'pointer', accentColor: '#3b82f6' }}
+            />
+            <span style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 'bold', color: '#2563eb', width: '50px' }}>
+              {(manipulatorPos * 100).toFixed(1)} cm
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* 3D Viewport - Takes Full Screen */}
-      <div style={{ flex: 1, width: '100%', height: '100%' }}>
-        <Canvas camera={{ position: [0.6, 0.35, 0.7], fov: 45 }}>
-          <color attach="background" args={['#090d16']} />
-          
-          {/* Studio Lighting & Realistic Metal Reflections */}
-          <ambientLight intensity={0.8} />
-          <directionalLight position={[5, 8, 5]} intensity={2.0} />
-          <directionalLight position={[-5, -2, -5]} intensity={1.0} color="#38bdf8" />
-          <pointLight position={[0, 2, 0]} intensity={1.5} />
-          <Environment preset="city" />
+      {/* Main Workspace Area */}
+      <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
+        
+        {/* Left Properties Sidebar */}
+        <div style={{ width: '280px', backgroundColor: '#ffffff', borderRight: '1px solid #e2e8f0', padding: '20px', zIndex: 5, overflowY: 'auto' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: '700', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
+            Inspection & Info
+          </h3>
+          <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <p style={{ margin: '0 0 6px 0', fontSize: '12px', color: '#64748b', fontWeight: '600' }}>SELECTED COMPONENT:</p>
+            <p style={{ margin: '0 0 12px 0', fontSize: '15px', fontWeight: '700', color: '#0f172a' }}>{selectedPart}</p>
+            <hr style={{ border: 'none', borderTop: '1px solid #e2e8f0', margin: '10px 0' }} />
+            <p style={{ margin: '0', fontSize: '12px', color: '#475569', lineHeight: '1.5' }}>
+              {selectedPart === 'Main Chamber Body' && 'Main 6-way cross chamber body. Length: 56.5 cm, Inner Diameter: 14 cm, constructed from high-grade stainless steel.'}
+              {selectedPart === 'Linear Manipulator' && 'High-precision UHV linear transfer manipulator with 43 cm maximum stroke length for sample insertion.'}
+              {selectedPart === 'Evaporator / Deposition' && 'Scienta Omicron EFM evaporator cluster mounted on bottom port for metal film growth.'}
+              {selectedPart === 'Turbo Molecular Pump' && 'High-vacuum pumping station port with gate valve and isolation fittings.'}
+              {selectedPart === 'Viewport & Pyrometer' && 'Top CF flange fitted with optical quartz window for surface viewing and pyrometry.'}
+            </p>
+          </div>
 
-          <OrbitControls makeDefault minDistance={0.3} maxDistance={2.5} />
+          <div style={{ marginTop: '20px' }}>
+            <h4 style={{ fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '8px' }}>Chamber Parameters</h4>
+            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#64748b', lineHeight: '1.6' }}>
+              <li>Base Pressure: &lt; 1×10⁻¹⁰ mbar</li>
+              <li>Bakeout Temp: Up to 150°C</li>
+              <li>Sample Holder: Standard Omicron plate</li>
+            </ul>
+          </div>
+        </div>
 
-          {/* =========================================================
-              MAIN CHAMBER ASSEMBLY (1 unit = 1 meter scale)
-             ========================================================= */}
-          <group position={[0, 0, 0]}>
-
-            {/* 1. Main Horizontal Tube (56.5 cm Length, 14 cm Outer Diameter) */}
-            <mesh rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.07, 0.07, 0.565, 64]} />
-              <meshStandardMaterial color="#d1d5db" metalness={0.92} roughness={0.18} />
-            </mesh>
-
-            {/* Main Chamber End Flanges */}
-            <CFFlange position={[-0.2825, 0, 0]} rotation={[0, 0, Math.PI / 2]} radius={0.1} />
-            <CFFlange position={[0.2825, 0, 0]} rotation={[0, 0, -Math.PI / 2]} radius={0.1} />
-
-            {/* 2. Vertical Cross Branch (Viewport Top, Evaporator Bottom) */}
-            <mesh position={[0.08, 0, 0]}>
-              <cylinderGeometry args={[0.07, 0.07, 0.32, 64]} />
-              <meshStandardMaterial color="#d1d5db" metalness={0.92} roughness={0.18} />
-            </mesh>
-
-            {/* Top Viewport Flange & Glass Window */}
-            <CFFlange position={[0.08, 0.16, 0]} rotation={[0, 0, 0]} radius={0.1} />
-            <mesh position={[0.08, 0.165, 0]}>
-              <cylinderGeometry args={[0.065, 0.065, 0.005, 32]} />
-              <meshPhysicalMaterial color="#7dd3fc" transmission={0.9} opacity={1} transparent roughness={0.05} ior={1.5} />
-            </mesh>
-
-            {/* Bottom Evaporator Connection Flange */}
-            <CFFlange position={[0.08, -0.16, 0]} rotation={[Math.PI, 0, 0]} radius={0.1} />
+        {/* 3D Viewport Canvas */}
+        <div style={{ flex: 1, position: 'relative' }}>
+          <Canvas camera={{ position: [0.5, 0.4, 0.6], fov: 42 }}>
+            <color attach="background" args={['#f8fafc']} />
             
-            {/* Evaporator Cluster Body (Bottom) */}
-            <group position={[0.08, -0.23, 0]}>
-              <mesh>
-                <cylinderGeometry args={[0.065, 0.08, 0.12, 32]} />
-                <meshStandardMaterial color="#94a3b8" metalness={0.85} roughness={0.25} />
-              </mesh>
-            </group>
+            {/* Soft Studio Lighting */}
+            <ambientLight intensity={0.9} />
+            <directionalLight position={[6, 10, 6]} intensity={1.8} />
+            <directionalLight position={[-6, -4, -6]} intensity={0.6} />
+            <Environment preset="city" />
 
-            {/* 3. Turbo Pump / Gauge Side Cross (Left Side Assembly) */}
-            <group position={[-0.2, 0, 0]}>
-              {/* Vertical Branch for Turbo / Pressure Gauge */}
-              <mesh position={[0, 0, 0]}>
-                <cylinderGeometry args={[0.045, 0.045, 0.22, 32]} />
-                <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.2} />
-              </mesh>
-              <CFFlange position={[0, 0.11, 0]} radius={0.065} />
-              <CFFlange position={[0, -0.11, 0]} rotation={[Math.PI, 0, 0]} radius={0.065} />
+            <OrbitControls makeDefault minDistance={0.3} maxDistance={2.0} />
 
-              {/* Turbo Pump Unit attached at bottom */}
-              <group position={[0, -0.2, 0]}>
+            {/* =========================================================
+                3D MODEL ASSEMBLY WITH INTERACTIVE HTML LABELS
+               ========================================================= */}
+            <group position={[0, 0, 0]}>
+
+              {/* 1. Main Chamber Body */}
+              <group onClick={() => setSelectedPart('Main Chamber Body')} style={{ cursor: 'pointer' }}>
+                <mesh rotation={[0, 0, Math.PI / 2]}>
+                  <cylinderGeometry args={[0.07, 0.07, 0.565, 64]} />
+                  <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.2} />
+                </mesh>
+                <CFFlange position={[-0.2825, 0, 0]} rotation={[0, 0, Math.PI / 2]} radius={0.095} />
+                <CFFlange position={[0.2825, 0, 0]} rotation={[0, 0, -Math.PI / 2]} radius={0.095} />
+                
+                <Html position={[0, 0.12, 0]} center>
+                  <div onClick={() => setSelectedPart('Main Chamber Body')} style={{
+                    background: '#ffffff', padding: '4px 10px', borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: '1px solid #cbd5e1',
+                    fontSize: '11px', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', cursor: 'pointer'
+                  }}>
+                    Main Chamber (56.5 cm)
+                  </div>
+                </Html>
+              </group>
+
+              {/* 2. Top Viewport */}
+              <group position={[0.08, 0, 0]} onClick={() => setSelectedPart('Viewport & Pyrometer')}>
                 <mesh>
-                  <cylinderGeometry args={[0.075, 0.06, 0.16, 32]} />
+                  <cylinderGeometry args={[0.07, 0.07, 0.32, 64]} />
+                  <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.2} />
+                </mesh>
+                <CFFlange position={[0.08, 0.16, 0]} radius={0.095} />
+                <mesh position={[0.08, 0.165, 0]}>
+                  <cylinderGeometry args={[0.065, 0.065, 0.004, 32]} />
+                  <meshPhysicalMaterial color="#38bdf8" transmission={0.9} opacity={1} transparent roughness={0.05} ior={1.5} />
+                </mesh>
+
+                <Html position={[0.08, 0.22, 0]} center>
+                  <div style={{
+                    background: '#ffffff', padding: '4px 10px', borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: '1px solid #cbd5e1',
+                    fontSize: '11px', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', cursor: 'pointer'
+                  }}>
+                    Viewport / Pyrometer
+                  </div>
+                </Html>
+              </group>
+
+              {/* 3. Evaporator (Bottom) */}
+              <group position={[0.08, -0.22, 0]} onClick={() => setSelectedPart('Evaporator / Deposition')}>
+                <mesh>
+                  <cylinderGeometry args={[0.065, 0.08, 0.12, 32]} />
+                  <meshStandardMaterial color="#64748b" metalness={0.8} roughness={0.3} />
+                </mesh>
+                <Html position={[0, -0.1, 0]} center>
+                  <div style={{
+                    background: '#ffffff', padding: '4px 10px', borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: '1px solid #cbd5e1',
+                    fontSize: '11px', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', cursor: 'pointer'
+                  }}>
+                    Evaporator
+                  </div>
+                </Html>
+              </group>
+
+              {/* 4. Turbo Pump Port (Left) */}
+              <group position={[-0.2, -0.15, 0]} onClick={() => setSelectedPart('Turbo Molecular Pump')}>
+                <mesh>
+                  <cylinderGeometry args={[0.07, 0.05, 0.16, 32]} />
                   <meshStandardMaterial color="#334155" metalness={0.6} roughness={0.4} />
                 </mesh>
-                {/* Cooling Fins / Ribs */}
-                <mesh position={[0, -0.02, 0]}>
-                  <cylinderGeometry args={[0.08, 0.08, 0.08, 32]} />
-                  <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.3} />
-                </mesh>
+                <Html position={[0, -0.12, 0]} center>
+                  <div style={{
+                    background: '#ffffff', padding: '4px 10px', borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: '1px solid #cbd5e1',
+                    fontSize: '11px', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', cursor: 'pointer'
+                  }}>
+                    Turbo Pump Port
+                  </div>
+                </Html>
               </group>
+
+              {/* 5. Linear Manipulator (Right with dynamic stroke) */}
+              <group position={[0.29 + (0.43 - manipulatorPos), 0, 0]} onClick={() => setSelectedPart('Linear Manipulator')}>
+                <mesh rotation={[0, 0, Math.PI / 2]}>
+                  <cylinderGeometry args={[0.06, 0.06, 0.1, 32]} />
+                  <meshStandardMaterial color="#94a3b8" metalness={0.85} roughness={0.2} />
+                </mesh>
+                {/* Moving Rod */}
+                <mesh position={[-manipulatorPos / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+                  <cylinderGeometry args={[0.012, 0.012, manipulatorPos, 32]} />
+                  <meshStandardMaterial color="#f8fafc" metalness={1.0} roughness={0.05} />
+                </mesh>
+                {/* Sample Stage Tip */}
+                <mesh position={[-manipulatorPos, 0, 0]}>
+                  <boxGeometry args={[0.03, 0.025, 0.025]} />
+                  <meshStandardMaterial color="#f59e0b" metalness={0.8} roughness={0.2} />
+                </mesh>
+
+                <Html position={[0, 0.1, 0]} center>
+                  <div style={{
+                    background: '#ffffff', padding: '4px 10px', borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: '1px solid #cbd5e1',
+                    fontSize: '11px', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', cursor: 'pointer'
+                  }}>
+                    Linear Manipulator (43 cm)
+                  </div>
+                </Html>
+              </group>
+
             </group>
 
-            {/* 4. Gate Valve (Estimated 7 cm width between Main Cross & Loadlock) */}
-            <group position={[-0.32, 0, 0]}>
-              <mesh rotation={[0, 0, Math.PI / 2]}>
-                <boxGeometry args={[0.16, 0.07, 0.16]} />
-                <meshStandardMaterial color="#e2e8f0" metalness={0.9} roughness={0.2} />
-              </mesh>
-              {/* Actuator Valve Knob / Cylinder on Top */}
-              <mesh position={[0, 0.14, 0]}>
-                <cylinderGeometry args={[0.025, 0.025, 0.12, 16]} />
-                <meshStandardMaterial color="#ef4444" metalness={0.5} roughness={0.3} />
-              </mesh>
-            </group>
+            {/* Clean Studio Floor Shadow Grid */}
+            <gridHelper args={[3, 30, '#cbd5e1', '#e2e8f0']} position={[0, -0.35, 0]} />
+          </Canvas>
+        </div>
 
-            {/* 5. Linear Manipulator Assembly (Right Side) */}
-            {/* Base Housing on Main Flange */}
-            <group position={[0.29 + (0.43 - manipulatorPos), 0, 0]}>
-              <mesh rotation={[0, 0, Math.PI / 2]}>
-                <cylinderGeometry args={[0.06, 0.06, 0.1, 32]} />
-                <meshStandardMaterial color="#94a3b8" metalness={0.85} roughness={0.2} />
-              </mesh>
-
-              {/* Stainless Steel Drive Shaft entering into the chamber */}
-              <mesh position={[-manipulatorPos / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-                <cylinderGeometry args={[0.012, 0.012, manipulatorPos, 32]} />
-                <meshStandardMaterial color="#f8fafc" metalness={1.0} roughness={0.05} />
-              </mesh>
-
-              {/* Sample Stage / Transfer Head at the tip */}
-              <mesh position={[-manipulatorPos, 0, 0]}>
-                <boxGeometry args={[0.03, 0.025, 0.025]} />
-                <meshStandardMaterial color="#f59e0b" metalness={0.8} roughness={0.2} />
-              </mesh>
-            </group>
-
-          </group>
-
-          {/* Reference Floor Grid */}
-          <gridHelper args={[3, 30, '#475569', '#1e293b']} position={[0, -0.35, 0]} />
-        </Canvas>
       </div>
-
     </div>
   );
 }
