@@ -29,6 +29,10 @@ const DIM = {
   evapPortRadius: 0.042,     // CF40 port offset from flange axis
   evapNipples: [0.07, 0.085, 0.06],
   evapLength: 0.17,
+  evapFocus: [0, 0, 0],      // point every evaporator is aimed at (sample at cross centre)
+  viewportClear: 0.056,      // CF63 viewport clear aperture
+  pyroStandoff: 0.04,        // viewport window to pyrometer lens
+  pyroLen: 0.13,             // pyrometer head length
   manipTotal: 0.82,          // manipulator flange face to end of tube
   manipStroke: 0.49,
   manipTubeOD: 0.038,
@@ -50,6 +54,10 @@ const X = {
 };
 X.teeMid = (X.teeStart + X.manipFlange) / 2;
 const SMALL_CROSS_Y = DIM.mainFace + DIM.topReducer + DIM.smallFace;
+
+// Evaporator tilt from vertical so each port axis passes through DIM.evapFocus
+const EVAP_TILT_DEG =
+  (Math.atan2(DIM.evapPortRadius, DIM.mainFace + DIM.bottomFlange + DIM.evapFocus[1]) * 180) / Math.PI;
 
 // Manipulator kinematics: the flange is bolted down, only the shaft + carriage move.
 const shaftEndAt = (travel) => X.manipFlange - DIM.shaftProtrude - travel;
@@ -79,13 +87,25 @@ const PARTS = {
   },
   evaporators: {
     name: 'Bottom multiport flange + evaporators',
-    desc: 'CF100 flange with three CF40 ports, mounted on the bottom port of the cross. Evaporators point up at the cross centre, so the sample faces down.',
-    specs: ['Flange: CF100 → 3 × CF40', `Port offset: ${cm(DIM.evapPortRadius)} cm from axis`],
+    desc: 'CF100 flange with three angled CF40 ports, mounted on the bottom port of the cross. Each evaporator is tilted so its axis passes through the sample at the cross centre.',
+    specs: [
+      'Flange: CF100 → 3 × CF40 (angled)',
+      `Port offset: ${cm(DIM.evapPortRadius)} cm from axis`,
+      `Tilt from vertical: ${EVAP_TILT_DEG.toFixed(1)}°`,
+    ],
   },
   topCross: {
     name: 'Reducer + 60 mm 6-way cross',
     desc: 'Conical CF100 → CF63 reducer on the top port, carrying a CF63 (~60 mm bore) 6-way cross.',
     specs: [`Reducer length: ${cm(DIM.topReducer)} cm`, `Small cross centre-to-face: ${cm(DIM.smallFace)} cm`],
+  },
+  pyrometer: {
+    name: 'Pyrometer viewport',
+    desc: 'CF63 viewport on the top port of the 60 mm cross, with the pyrometer on a bracket looking straight down to the cross centre. Its line of sight goes through the 60 mm cross and the reducer to the stage.',
+    specs: [
+      `Viewport clear aperture: ${cm(DIM.viewportClear)} cm`,
+      `Working distance to cross centre: ${cm(SMALL_CROSS_Y + DIM.smallFace + CF.CF63.t + DIM.pyroStandoff)} cm`,
+    ],
   },
   gateValve: {
     name: 'CF100 gate valve',
@@ -208,6 +228,19 @@ function Label({ position, children, tone = 'default' }) {
   );
 }
 
+// Thin line-of-sight / beam indicator; ignores clicks so it never blocks parts behind it
+function Beam({ from, to, color, opacity = 0.6 }) {
+  const a = new THREE.Vector3(...from);
+  const b = new THREE.Vector3(...to);
+  const q = new THREE.Quaternion().setFromUnitVectors(UP, b.clone().sub(a).normalize());
+  return (
+    <mesh position={a.clone().add(b).multiplyScalar(0.5)} quaternion={q} raycast={() => null}>
+      <cylinderGeometry args={[0.0015, 0.0015, a.distanceTo(b), 8]} />
+      <meshBasicMaterial color={color} transparent opacity={opacity} depthWrite={false} />
+    </mesh>
+  );
+}
+
 /* ==================================================================
  * ASSEMBLY
  * ================================================================== */
@@ -245,7 +278,7 @@ function TopCross() {
       {ports.map((d, i) => (
         <CFFlange key={i} at={[d[0] * f, cy + d[1] * f, d[2] * f]} dir={d} size="CF63" />
       ))}
-      <Label position={[0, cy + f + 0.04, 0]}>Reducer + 60 mm 6-way cross</Label>
+      <Label position={[0, cy, f + 0.05]}>Reducer + 60 mm 6-way cross</Label>
     </Part>
   );
 }
@@ -253,26 +286,60 @@ function TopCross() {
 function Evaporators() {
   const yFace = -DIM.mainFace;
   const yBack = yFace - DIM.bottomFlange;
+  const focus = new THREE.Vector3(...DIM.evapFocus);
   return (
     <Part id="evaporators">
       <CFFlange at={[0, yFace, 0]} dir={[0, 1, 0]} size="CF100" t={DIM.bottomFlange} />
       {DIM.evapNipples.map((len, i) => {
         const a = (i / DIM.evapNipples.length) * Math.PI * 2 + Math.PI / 2;
-        const px = DIM.evapPortRadius * Math.cos(a);
-        const pz = DIM.evapPortRadius * Math.sin(a);
-        const yEnd = yBack - len;
-        const yBody = yEnd - CF.CF40.t;
+        const base = new THREE.Vector3(DIM.evapPortRadius * Math.cos(a), yBack, DIM.evapPortRadius * Math.sin(a));
+        // Port axis runs from the focus out through the port: down and outwards
+        const d = base.clone().sub(focus).normalize();
+        const at = (s) => base.clone().addScaledVector(d, s).toArray();
+        const body = len + CF.CF40.t;
         return (
           <group key={i}>
-            <Tube from={[px, yBack, pz]} to={[px, yEnd, pz]} r={CF.CF40.tube / 2} />
-            <CFFlange at={[px, yEnd, pz]} dir={[0, -1, 0]} size="CF40" />
-            <CFFlange at={[px, yEnd, pz]} dir={[0, 1, 0]} size="CF40" />
-            <Tube from={[px, yBody, pz]} to={[px, yBody - DIM.evapLength, pz]} r={0.022} color="#64748b" metalness={0.8} roughness={0.3} />
-            <Tube from={[px, yBody - DIM.evapLength, pz]} to={[px, yBody - DIM.evapLength - 0.03, pz]} r={0.012} color="#1e293b" metalness={0.5} roughness={0.5} />
+            <Tube from={base.toArray()} to={at(len)} r={CF.CF40.tube / 2} />
+            <CFFlange at={at(len)} dir={d.toArray()} size="CF40" />
+            <CFFlange at={at(len)} dir={d.clone().negate().toArray()} size="CF40" />
+            <Tube from={at(body)} to={at(body + DIM.evapLength)} r={0.022} color="#64748b" metalness={0.8} roughness={0.3} />
+            <Tube from={at(body + DIM.evapLength)} to={at(body + DIM.evapLength + 0.03)} r={0.012} color="#1e293b" metalness={0.5} roughness={0.5} />
+            <Beam from={base.toArray()} to={DIM.evapFocus} color="#f59e0b" opacity={0.45} />
           </group>
         );
       })}
-      <Label position={[0.13, -0.32, 0]}>Evaporators (3 × CF40)</Label>
+      <Label position={[0.16, -0.33, 0]}>Evaporators (3 × CF40, {EVAP_TILT_DEG.toFixed(0)}° tilt)</Label>
+    </Part>
+  );
+}
+
+function Pyrometer({ targetY }) {
+  const yFace = SMALL_CROSS_Y + DIM.smallFace;
+  const yWin = yFace + CF.CF63.t;
+  const yLens = yWin + DIM.pyroStandoff;
+  const yBar = yLens + 0.03;
+  return (
+    <Part id="pyrometer">
+      {/* CF63 viewport */}
+      <CFFlange at={[0, yFace, 0]} dir={[0, -1, 0]} size="CF63" />
+      <mesh position={[0, yFace + CF.CF63.t * 0.6, 0]}>
+        <cylinderGeometry args={[DIM.viewportClear / 2, DIM.viewportClear / 2, 0.003, 48]} />
+        <meshStandardMaterial color="#bae6fd" transparent opacity={0.55} metalness={0.1} roughness={0.05} />
+      </mesh>
+      {/* Bracket on the viewport bolts */}
+      {[-1, 1].map((s) => (
+        <Tube key={s} from={[s * 0.045, yWin, 0]} to={[s * 0.045, yBar, 0]} r={0.003} color="#94a3b8" solid />
+      ))}
+      <mesh position={[0, yBar, 0]}>
+        <boxGeometry args={[0.1, 0.006, 0.024]} />
+        <Metal color="#94a3b8" solid />
+      </mesh>
+      {/* Pyrometer head looking straight down */}
+      <Tube from={[0, yLens, 0]} to={[0, yLens + DIM.pyroLen, 0]} r={0.018} color="#1f2937" metalness={0.5} roughness={0.4} solid />
+      <Tube from={[0, yLens - 0.006, 0]} to={[0, yLens, 0]} r={0.011} color="#0f172a" metalness={0.3} roughness={0.2} solid />
+      <Tube from={[0, yLens + DIM.pyroLen, 0]} to={[0, yLens + DIM.pyroLen + 0.025, 0]} r={0.005} color="#334155" solid />
+      <Beam from={[0, yLens - 0.006, 0]} to={[0, targetY, 0]} color="#ef4444" />
+      <Label position={[0.09, yLens + DIM.pyroLen / 2, 0]}>Pyrometer + CF63 viewport</Label>
     </Part>
   );
 }
@@ -432,6 +499,9 @@ export default function UHVBuilder() {
   const sampleX = sampleXAt(travel);
   const stageFront = shaftEndAt(travel) - DIM.stageLen;
   const collision = !gateOpen && stageFront < X.gateMid;
+  // Pyrometer looks straight down the vertical axis (x = 0): does the stage block it?
+  const pyroOnStage = stageFront <= 0 && shaftEndAt(travel) >= 0;
+  const pyroTargetY = pyroOnStage ? 0.005 : -DIM.mainFace;
   const info = PARTS[selected];
 
   const ctx = { selected, hovered, xray, labels, setSelected, setHovered };
@@ -442,7 +512,7 @@ export default function UHVBuilder() {
         <div>
           <h2 style={S.title}>UHV Chamber Configurator</h2>
           <p style={S.subtitle}>
-            100 mm 4-way cross · Top: reducer → 60 mm 6-way cross · Bottom: evaporators · Left: gate valve → load lock · Right: {cm(DIM.manipTotal)} cm manipulator ({cm(DIM.manipStroke)} cm stroke)
+            100 mm 4-way cross · Top: reducer → 60 mm 6-way cross + pyrometer viewport · Bottom: angled evaporators · Left: gate valve → load lock · Right: {cm(DIM.manipTotal)} cm manipulator ({cm(DIM.manipStroke)} cm stroke)
           </p>
         </div>
         <div style={S.controls}>
@@ -477,6 +547,7 @@ export default function UHVBuilder() {
             <Row k="Sample vs. cross centre" v={`${sampleX >= 0 ? '+' : ''}${cm(sampleX)} cm`} />
             <Row k="Zone" v={zoneOf(sampleX)} />
             <Row k="Travel to centre" v={`${cm(TRAVEL_TO_CENTRE)} cm`} />
+            <Row k="Pyrometer spot" v={pyroOnStage ? 'On stage (top side)' : 'Off stage'} />
             {collision && (
               <p style={{ margin: '8px 0 0', fontSize: 12, fontWeight: 600, color: '#b91c1c' }}>
                 Stage hits the closed gate valve. Open the valve first.
@@ -521,6 +592,7 @@ export default function UHVBuilder() {
             <SceneCtx.Provider value={ctx}>
               <MainCross />
               <TopCross />
+              <Pyrometer targetY={pyroTargetY} />
               <Evaporators />
               <GateValve open={gateOpen} />
               <Loadlock />
@@ -529,7 +601,7 @@ export default function UHVBuilder() {
               <HeatingStage travel={travel} />
             </SceneCtx.Provider>
 
-            <gridHelper args={[3, 30, '#cbd5e1', '#e2e8f0']} position={[0.25, -0.46, 0]} />
+            <gridHelper args={[3, 30, '#cbd5e1', '#e2e8f0']} position={[0.25, -0.48, 0]} />
           </Canvas>
         </main>
       </div>
