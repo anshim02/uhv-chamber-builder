@@ -41,8 +41,7 @@ const DIM = {
   gaugeLen: 0.12,
   profile: 0.04,             // 40 × 40 aluminium profile
   floorY: -0.48,
-  railY: -0.19,              // centre of the upper frame rails
-  railZ: 0.21,               // rails either side, clear of the angled evaporators
+  footLen: 0.30,             // cross-foot under each leg
   manipTotal: 0.82,          // manipulator flange face to end of tube
   manipStroke: 0.49,
   rotationLimitDeg: 180,     // ± rotation; keep within what the coiled stage wires tolerate
@@ -120,8 +119,8 @@ const PARTS = {
   },
   turbo: {
     name: 'Turbo pump (back port, −z)',
-    desc: 'CF63-inlet turbo bolted straight onto the back port of the 60 mm cross, so there is no reducer to cut pumping speed. The back is the only clear side: the left port sits above the gate-valve actuator, and the back keeps the front free for access. A frame post under the pump body carries its weight, so the CF63 port is not loaded.',
-    specs: ['Inlet: CF63, no reducer', '~70–90 L/s class (HiPace 80 / TwisTorr 84 FS)', 'Foreline: KF16 to the backing pump', 'Supported by a frame post'],
+    desc: 'CF63-inlet turbo bolted straight onto the back port of the 60 mm cross, so there is no reducer to cut pumping speed. The back is the only clear side: the left port sits above the gate-valve actuator, and the back keeps the front free for access. Pumps of this size are rated for horizontal mounting on the flange alone, so they need no support.',
+    specs: ['Inlet: CF63, no reducer', '~70–90 L/s class (HiPace 80 / TwisTorr 84 FS)', 'Foreline: KF16 to the backing pump', 'Hangs on its flange; no support'],
   },
   gauge: {
     name: 'Pressure gauge (right port, +x)',
@@ -129,9 +128,9 @@ const PARTS = {
     specs: ['Port: CF63 → CF40', 'Range: atmosphere to ~1e-9 mbar', 'Cable runs back along the manipulator side'],
   },
   frame: {
-    name: 'Aluminium profile frame',
-    desc: '40 × 40 profile frame. The upper rails run either side of the evaporators. Saddles support the load lock, the feedthrough tee and the manipulator tail; a post supports the turbo. The manipulator can only be supported at its two ends because the carriage rides the full tube.',
-    specs: [`Profile: ${DIM.profile * 1000} × ${DIM.profile * 1000} mm`, `Rail spacing: ${cm(2 * DIM.railZ)} cm`, 'Supports: load lock, tee, manipulator tail, turbo'],
+    name: 'Aluminium profile supports',
+    desc: 'Two T-shaped legs, each one upright with a cross-foot. One is under the feedthrough tee, which carries the manipulator flange. The other is under the manipulator tail, at the very end of the tube, because the carriage rides the rest of it. The load lock is already supported, and the evaporators stay clear.',
+    specs: [`Profile: ${DIM.profile * 1000} × ${DIM.profile * 1000} mm`, '4 profile pieces + 2 clamp pads', `Foot length: ${cm(DIM.footLen)} cm`],
   },
   gateValve: {
     name: 'CF100 gate valve',
@@ -431,13 +430,15 @@ function Profile({ from, to }) {
   );
 }
 
-// Vertical profile from the upper cross member up to a part, topped with a clamp pad
-function Saddle({ x, z = 0, topY }) {
+// T-leg: cross-foot on the floor, upright to the part, clamp pad on top
+function Leg({ x, topY }) {
   const p = DIM.profile;
+  const yFoot = DIM.floorY + p / 2;
   return (
     <>
-      <Profile from={[x, DIM.railY + p / 2, z]} to={[x, topY - 0.012, z]} />
-      <mesh position={[x, topY - 0.006, z]}>
+      <Profile from={[x, yFoot, -DIM.footLen / 2]} to={[x, yFoot, DIM.footLen / 2]} />
+      <Profile from={[x, yFoot + p / 2, 0]} to={[x, topY - 0.012, 0]} />
+      <mesh position={[x, topY - 0.006, 0]}>
         <boxGeometry args={[p + 0.01, 0.012, 0.06]} />
         <Metal color="#334155" metalness={0.2} roughness={0.7} solid />
       </mesh>
@@ -445,34 +446,14 @@ function Saddle({ x, z = 0, topY }) {
   );
 }
 
+// Load lock is already supported, so only the right-hand side needs legs
 function Frame() {
-  const p = DIM.profile;
-  const yb = DIM.floorY + p / 2;
-  const yt = DIM.railY;
-  const z = DIM.railZ;
-  const x0 = X.loadlockEnd - 0.06;
-  const x1 = X.manipFlange + DIM.manipTotal + 0.04;
-  const xLoadlock = (X.gateEnd + X.loadlockEnd) / 2;
   const xTail = X.manipFlange + DIM.manipTotal - 0.02;
-  const posts = [x0, 0.45, x1];
-  const crossMembers = [x0, xLoadlock, X.teeMid, xTail, x1];
   return (
     <Part id="frame">
-      {[-z, z].map((zz) => (
-        <group key={zz}>
-          <Profile from={[x0, yb, zz]} to={[x1, yb, zz]} />
-          <Profile from={[x0, yt, zz]} to={[x1, yt, zz]} />
-          {posts.map((x) => <Profile key={x} from={[x, yb + p / 2, zz]} to={[x, yt - p / 2, zz]} />)}
-        </group>
-      ))}
-      {[x0, x1].map((x) => <Profile key={x} from={[x, yb, -z + p / 2]} to={[x, yb, z - p / 2]} />)}
-      {crossMembers.map((x) => <Profile key={x} from={[x, yt, -z + p / 2]} to={[x, yt, z - p / 2]} />)}
-      <Saddle x={xLoadlock} topY={-CF.CF100.tube / 2} />
-      <Saddle x={X.teeMid} topY={-CF.CF40.tube / 2} />
-      <Saddle x={xTail} topY={-DIM.manipTubeOD / 2} />
-      {/* Turbo post, standing on the back rail */}
-      <Saddle x={0} z={-z} topY={SMALL_CROSS_Y - DIM.turboOD / 2} />
-      <Label position={[0.45, yt - 0.06, z + 0.03]}>Aluminium profile frame</Label>
+      <Leg x={X.teeMid} topY={-CF.CF40.tube / 2} />
+      <Leg x={xTail} topY={-DIM.manipTubeOD / 2} />
+      <Label position={[xTail, DIM.floorY + 0.08, DIM.footLen / 2]}>Profile supports</Label>
     </Part>
   );
 }
