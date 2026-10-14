@@ -33,8 +33,19 @@ const DIM = {
   viewportClear: 0.056,      // CF63 viewport clear aperture
   pyroStandoff: 0.04,        // viewport window to pyrometer lens
   pyroLen: 0.13,             // pyrometer head length
+  turboOD: 0.10,             // CF63-inlet turbo (HiPace 80 / TwisTorr 84 class)
+  turboLen: 0.15,
+  turboElecLen: 0.04,        // drive electronics on the pump end
+  gaugeReducer: 0.02,        // CF63 -> CF40 zero-length reducer
+  gaugeOD: 0.06,             // full-range gauge body (PKR 361 class)
+  gaugeLen: 0.12,
+  profile: 0.04,             // 40 × 40 aluminium profile
+  floorY: -0.48,
+  railY: -0.19,              // centre of the upper frame rails
+  railZ: 0.21,               // rails either side, clear of the angled evaporators
   manipTotal: 0.82,          // manipulator flange face to end of tube
   manipStroke: 0.49,
+  rotationLimitDeg: 180,     // ± rotation; keep within what the coiled stage wires tolerate
   manipTubeOD: 0.038,
   carriageLen: 0.12,
   carriageRetracted: 0.70,   // carriage centre from flange face at 0 travel
@@ -107,6 +118,21 @@ const PARTS = {
       `Working distance to cross centre: ${cm(SMALL_CROSS_Y + DIM.smallFace + CF.CF63.t + DIM.pyroStandoff)} cm`,
     ],
   },
+  turbo: {
+    name: 'Turbo pump (back port, −z)',
+    desc: 'CF63-inlet turbo bolted straight onto the back port of the 60 mm cross, so there is no reducer to cut pumping speed. The back is the only clear side: the left port sits above the gate-valve actuator, and the back keeps the front free for access. A frame post under the pump body carries its weight, so the CF63 port is not loaded.',
+    specs: ['Inlet: CF63, no reducer', '~70–90 L/s class (HiPace 80 / TwisTorr 84 FS)', 'Foreline: KF16 to the backing pump', 'Supported by a frame post'],
+  },
+  gauge: {
+    name: 'Pressure gauge (right port, +x)',
+    desc: 'Full-range cold-cathode/Pirani gauge on a CF63 → CF40 reducer. It is at 90° to the turbo inlet, so it reads chamber pressure and not pump-inlet pressure. It is outside the evaporator flux, and a cold-cathode gauge has no hot filament to glow into the pyrometer reading.',
+    specs: ['Port: CF63 → CF40', 'Range: atmosphere to ~1e-9 mbar', 'Cable runs back along the manipulator side'],
+  },
+  frame: {
+    name: 'Aluminium profile frame',
+    desc: '40 × 40 profile frame. The upper rails run either side of the evaporators. Saddles support the load lock, the feedthrough tee and the manipulator tail; a post supports the turbo. The manipulator can only be supported at its two ends because the carriage rides the full tube.',
+    specs: [`Profile: ${DIM.profile * 1000} × ${DIM.profile * 1000} mm`, `Rail spacing: ${cm(2 * DIM.railZ)} cm`, 'Supports: load lock, tee, manipulator tail, turbo'],
+  },
   gateValve: {
     name: 'CF100 gate valve',
     desc: 'Left port. Isolates the main chamber from the load lock. Open it before transferring the stage.',
@@ -125,7 +151,12 @@ const PARTS = {
   manipulator: {
     name: 'Linear manipulator',
     desc: 'Magnetically coupled linear shift. The CF40 flange is fixed to the tee and the carriage slides along the outer tube, driving the shaft into the chamber.',
-    specs: [`Overall length: ${cm(DIM.manipTotal)} cm`, `Stroke: ${cm(DIM.manipStroke)} cm`, 'Mount: CF40'],
+    specs: [
+      `Overall length: ${cm(DIM.manipTotal)} cm`,
+      `Stroke: ${cm(DIM.manipStroke)} cm`,
+      `Rotation: ±${DIM.rotationLimitDeg}° (turn the carriage)`,
+      'Mount: CF40',
+    ],
   },
   heatingStage: {
     name: 'Heating stage',
@@ -267,6 +298,8 @@ function TopCross() {
   const f = DIM.smallFace;
   const r = CF.CF63.tube / 2;
   const ports = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  // Ports with nothing else on them: left (above gate-valve actuator) and front (spare)
+  const blanks = [[-1, 0, 0], [0, 0, 1]];
   return (
     <Part id="topCross">
       <Tube from={[0, y0, 0]} to={[0, y1, 0]} r={CF.CF100.tube / 2} r2={r} />
@@ -277,6 +310,9 @@ function TopCross() {
       <Tube from={[0, cy, -f]} to={[0, cy, f]} r={r} />
       {ports.map((d, i) => (
         <CFFlange key={i} at={[d[0] * f, cy + d[1] * f, d[2] * f]} dir={d} size="CF63" />
+      ))}
+      {blanks.map((d, i) => (
+        <CFFlange key={`b${i}`} at={[d[0] * f, cy, d[2] * f]} dir={[-d[0], 0, -d[2]]} size="CF63" />
       ))}
       <Label position={[0, cy, f + 0.05]}>Reducer + 60 mm 6-way cross</Label>
     </Part>
@@ -344,6 +380,103 @@ function Pyrometer({ targetY }) {
   );
 }
 
+function Turbo() {
+  const f = DIM.smallFace;
+  const cy = SMALL_CROSS_Y;
+  const z0 = -f - CF.CF63.t;
+  const zEnd = z0 - DIM.turboLen;
+  const r = DIM.turboOD / 2;
+  return (
+    <Part id="turbo">
+      <CFFlange at={[0, cy, -f]} dir={[0, 0, 1]} size="CF63" />
+      <Tube from={[0, cy, z0]} to={[0, cy, zEnd]} r={r} color="#475569" metalness={0.6} roughness={0.35} solid />
+      <mesh position={[0, cy, zEnd - DIM.turboElecLen / 2]}>
+        <boxGeometry args={[0.09, 0.09, DIM.turboElecLen]} />
+        <Metal color="#1e293b" metalness={0.3} roughness={0.5} solid />
+      </mesh>
+      {/* KF16 foreline to the backing pump */}
+      <Tube from={[r - 0.01, cy, zEnd + 0.03]} to={[r + 0.03, cy, zEnd + 0.03]} r={0.009} solid />
+      <Tube from={[r + 0.03, cy, zEnd + 0.03]} to={[r + 0.034, cy, zEnd + 0.03]} r={0.015} solid />
+      <Label position={[0, cy + 0.08, (z0 + zEnd) / 2]}>Turbo (CF63)</Label>
+    </Part>
+  );
+}
+
+function Gauge() {
+  const f = DIM.smallFace;
+  const cy = SMALL_CROSS_Y;
+  const x40 = f + DIM.gaugeReducer;
+  const xBody = x40 + CF.CF40.t;
+  return (
+    <Part id="gauge">
+      <CFFlange at={[f, cy, 0]} dir={[-1, 0, 0]} size="CF63" t={DIM.gaugeReducer} />
+      <CFFlange at={[x40, cy, 0]} dir={[-1, 0, 0]} size="CF40" />
+      <Tube from={[xBody, cy, 0]} to={[xBody + DIM.gaugeLen, cy, 0]} r={DIM.gaugeOD / 2} color="#e5e7eb" metalness={0.5} roughness={0.35} solid />
+      <Tube from={[xBody + DIM.gaugeLen, cy, 0]} to={[xBody + DIM.gaugeLen + 0.03, cy, 0]} r={0.02} color="#1d4ed8" metalness={0.2} roughness={0.5} solid />
+      <Label position={[xBody + DIM.gaugeLen / 2, cy + 0.065, 0]}>Pressure gauge (CF40)</Label>
+    </Part>
+  );
+}
+
+// 40 × 40 profile between two points (axis-aligned)
+function Profile({ from, to }) {
+  const a = new THREE.Vector3(...from);
+  const b = new THREE.Vector3(...to);
+  const q = new THREE.Quaternion().setFromUnitVectors(UP, b.clone().sub(a).normalize());
+  return (
+    <mesh position={a.clone().add(b).multiplyScalar(0.5)} quaternion={q}>
+      <boxGeometry args={[DIM.profile, a.distanceTo(b), DIM.profile]} />
+      <Metal color="#b8bcc4" metalness={0.6} roughness={0.45} solid />
+    </mesh>
+  );
+}
+
+// Vertical profile from the upper cross member up to a part, topped with a clamp pad
+function Saddle({ x, z = 0, topY }) {
+  const p = DIM.profile;
+  return (
+    <>
+      <Profile from={[x, DIM.railY + p / 2, z]} to={[x, topY - 0.012, z]} />
+      <mesh position={[x, topY - 0.006, z]}>
+        <boxGeometry args={[p + 0.01, 0.012, 0.06]} />
+        <Metal color="#334155" metalness={0.2} roughness={0.7} solid />
+      </mesh>
+    </>
+  );
+}
+
+function Frame() {
+  const p = DIM.profile;
+  const yb = DIM.floorY + p / 2;
+  const yt = DIM.railY;
+  const z = DIM.railZ;
+  const x0 = X.loadlockEnd - 0.06;
+  const x1 = X.manipFlange + DIM.manipTotal + 0.04;
+  const xLoadlock = (X.gateEnd + X.loadlockEnd) / 2;
+  const xTail = X.manipFlange + DIM.manipTotal - 0.02;
+  const posts = [x0, 0.45, x1];
+  const crossMembers = [x0, xLoadlock, X.teeMid, xTail, x1];
+  return (
+    <Part id="frame">
+      {[-z, z].map((zz) => (
+        <group key={zz}>
+          <Profile from={[x0, yb, zz]} to={[x1, yb, zz]} />
+          <Profile from={[x0, yt, zz]} to={[x1, yt, zz]} />
+          {posts.map((x) => <Profile key={x} from={[x, yb + p / 2, zz]} to={[x, yt - p / 2, zz]} />)}
+        </group>
+      ))}
+      {[x0, x1].map((x) => <Profile key={x} from={[x, yb, -z + p / 2]} to={[x, yb, z - p / 2]} />)}
+      {crossMembers.map((x) => <Profile key={x} from={[x, yt, -z + p / 2]} to={[x, yt, z - p / 2]} />)}
+      <Saddle x={xLoadlock} topY={-CF.CF100.tube / 2} />
+      <Saddle x={X.teeMid} topY={-CF.CF40.tube / 2} />
+      <Saddle x={xTail} topY={-DIM.manipTubeOD / 2} />
+      {/* Turbo post, standing on the back rail */}
+      <Saddle x={0} z={-z} topY={SMALL_CROSS_Y - DIM.turboOD / 2} />
+      <Label position={[0.45, yt - 0.06, z + 0.03]}>Aluminium profile frame</Label>
+    </Part>
+  );
+}
+
 function GateValve({ open }) {
   const x0 = -DIM.mainFace;
   const x1 = X.gateEnd;
@@ -407,7 +540,7 @@ function FeedthroughTee() {
   );
 }
 
-function Manipulator({ travel }) {
+function Manipulator({ travel, rotation }) {
   const xf = X.manipFlange;
   const xEnd = xf + DIM.manipTotal;
   const carriageX = xf + DIM.carriageRetracted - travel;
@@ -418,7 +551,9 @@ function Manipulator({ travel }) {
       <Tube from={[xEnd - 0.005, 0, 0]} to={[xEnd, 0, 0]} r={DIM.manipTubeOD / 2 + 0.002} color="#94a3b8" />
       {/* Magnetically coupled carriage */}
       <Tube from={[carriageX - DIM.carriageLen / 2, 0, 0]} to={[carriageX + DIM.carriageLen / 2, 0, 0]} r={0.03} color="#e5e7eb" metalness={0.7} roughness={0.25} solid />
-      <Tube from={[carriageX, 0, 0.03]} to={[carriageX, 0, 0.038]} r={0.008} color="#475569" solid />
+      <group rotation={[rotation, 0, 0]}>
+        <Tube from={[carriageX, 0, 0.03]} to={[carriageX, 0, 0.038]} r={0.008} color="#475569" solid />
+      </group>
       {/* Shaft: inner magnet (at carriage) to tip */}
       <Tube from={[shaftEndAt(travel), 0, 0]} to={[carriageX, 0, 0]} r={DIM.shaftOD / 2} color="#f8fafc" metalness={1} roughness={0.05} solid />
       <Label position={[xf + DIM.manipTotal / 2, 0.075, 0]}>
@@ -428,7 +563,8 @@ function Manipulator({ travel }) {
   );
 }
 
-function StageWires({ shaftEnd }) {
+// The coil is fixed at the tee and turns with the stage at the other end, so rotation winds it up
+function StageWires({ shaftEnd, rotation }) {
   const curves = useMemo(() => {
     const x0 = X.teeMid;
     const x1 = shaftEnd - 0.004;
@@ -442,12 +578,12 @@ function StageWires({ shaftEnd }) {
       const N = 160;
       for (let i = 0; i <= N; i++) {
         const t = i / N;
-        const a = phase + t * turns * Math.PI * 2;
+        const a = phase + t * (turns * Math.PI * 2 + rotation);
         pts.push(new THREE.Vector3(x0 + (x1 - x0) * t, R * Math.cos(a), R * Math.sin(a)));
       }
       return new THREE.CatmullRomCurve3(pts);
     });
-  }, [shaftEnd]);
+  }, [shaftEnd, rotation]);
 
   return curves.map((c, i) => (
     <mesh key={i}>
@@ -457,11 +593,12 @@ function StageWires({ shaftEnd }) {
   ));
 }
 
-function HeatingStage({ travel }) {
+function HeatingStage({ travel, rotation }) {
   const se = shaftEndAt(travel);
   const frameLen = DIM.stageLen - 0.016;
   return (
     <Part id="heatingStage">
+      <group rotation={[rotation, 0, 0]}>
       <group position={[se, 0, 0]}>
         {/* Ceramic wire connector */}
         <mesh position={[-0.008, 0, 0]}>
@@ -479,7 +616,8 @@ function HeatingStage({ travel }) {
           <Metal color="#d4a017" metalness={0.8} roughness={0.25} solid />
         </mesh>
       </group>
-      <StageWires shaftEnd={se} />
+      </group>
+      <StageWires shaftEnd={se} rotation={rotation} />
       <Label position={[sampleXAt(travel), -0.045, 0.03]} tone="accent">Heating stage</Label>
     </Part>
   );
@@ -490,11 +628,13 @@ function HeatingStage({ travel }) {
  * ================================================================== */
 export default function UHVBuilder() {
   const [travel, setTravel] = useState(0); // metres, 0 = fully retracted
+  const [rotDeg, setRotDeg] = useState(0); // 0 = sample facing down at the evaporators
   const [selected, setSelected] = useState('mainCross');
   const [hovered, setHovered] = useState(null);
   const [gateOpen, setGateOpen] = useState(true);
   const [xray, setXray] = useState(true);
   const [labels, setLabels] = useState(true);
+  const [showFrame, setShowFrame] = useState(true);
 
   const sampleX = sampleXAt(travel);
   const stageFront = shaftEndAt(travel) - DIM.stageLen;
@@ -502,6 +642,10 @@ export default function UHVBuilder() {
   // Pyrometer looks straight down the vertical axis (x = 0): does the stage block it?
   const pyroOnStage = stageFront <= 0 && shaftEndAt(travel) >= 0;
   const pyroTargetY = pyroOnStage ? 0.005 : -DIM.mainFace;
+  const rotation = (rotDeg * Math.PI) / 180;
+  // Sample normal starts at -y; rotating about x gives y-component -cos(θ)
+  const facingY = -Math.cos(rotation);
+  const facing = facingY < -0.7 ? 'Down → evaporators' : facingY > 0.7 ? 'Up → pyrometer' : 'Sideways';
   const info = PARTS[selected];
 
   const ctx = { selected, hovered, xray, labels, setSelected, setHovered };
@@ -512,13 +656,14 @@ export default function UHVBuilder() {
         <div>
           <h2 style={S.title}>UHV Chamber Configurator</h2>
           <p style={S.subtitle}>
-            100 mm 4-way cross · Top: reducer → 60 mm 6-way cross + pyrometer viewport · Bottom: angled evaporators · Left: gate valve → load lock · Right: {cm(DIM.manipTotal)} cm manipulator ({cm(DIM.manipStroke)} cm stroke)
+            100 mm 4-way cross · Top: reducer → 60 mm 6-way cross (pyrometer up, turbo back, gauge right) · Bottom: angled evaporators · Left: gate valve → load lock · Right: {cm(DIM.manipTotal)} cm manipulator ({cm(DIM.manipStroke)} cm stroke)
           </p>
         </div>
         <div style={S.controls}>
           <Toggle on={gateOpen} onClick={() => setGateOpen(!gateOpen)}>Gate {gateOpen ? 'open' : 'closed'}</Toggle>
           <Toggle on={xray} onClick={() => setXray(!xray)}>X-ray</Toggle>
           <Toggle on={labels} onClick={() => setLabels(!labels)}>Labels</Toggle>
+          <Toggle on={showFrame} onClick={() => setShowFrame(!showFrame)}>Frame</Toggle>
         </div>
       </header>
 
@@ -543,11 +688,33 @@ export default function UHVBuilder() {
             </div>
           </div>
 
+          <div style={{ ...S.card, marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={S.muted}>Rotation</span>
+              <span style={S.big}>{rotDeg}°</span>
+            </div>
+            <input
+              type="range" min={-DIM.rotationLimitDeg} max={DIM.rotationLimitDeg} step={1}
+              value={rotDeg}
+              onChange={(e) => setRotDeg(parseInt(e.target.value, 10))}
+              style={{ width: '100%', accentColor: '#2563eb', margin: '8px 0' }}
+            />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button style={S.btn} onClick={() => setRotDeg(0)}>Evaporators</button>
+              <button style={S.btn} onClick={() => setRotDeg(90)}>90°</button>
+              <button style={S.btn} onClick={() => setRotDeg(180)}>Pyrometer</button>
+            </div>
+          </div>
+
           <div style={{ ...S.card, marginTop: 10, borderColor: collision ? '#fca5a5' : '#e2e8f0', background: collision ? '#fef2f2' : '#f8fafc' }}>
             <Row k="Sample vs. cross centre" v={`${sampleX >= 0 ? '+' : ''}${cm(sampleX)} cm`} />
             <Row k="Zone" v={zoneOf(sampleX)} />
             <Row k="Travel to centre" v={`${cm(TRAVEL_TO_CENTRE)} cm`} />
-            <Row k="Pyrometer spot" v={pyroOnStage ? 'On stage (top side)' : 'Off stage'} />
+            <Row k="Sample faces" v={facing} />
+            <Row
+              k="Pyrometer spot"
+              v={!pyroOnStage ? 'Off stage' : facingY > 0.7 ? 'On sample' : 'On stage (back side)'}
+            />
             {collision && (
               <p style={{ margin: '8px 0 0', fontSize: 12, fontWeight: 600, color: '#b91c1c' }}>
                 Stage hits the closed gate valve. Open the valve first.
@@ -593,12 +760,15 @@ export default function UHVBuilder() {
               <MainCross />
               <TopCross />
               <Pyrometer targetY={pyroTargetY} />
+              <Turbo />
+              <Gauge />
+              {showFrame && <Frame />}
               <Evaporators />
               <GateValve open={gateOpen} />
               <Loadlock />
               <FeedthroughTee />
-              <Manipulator travel={travel} />
-              <HeatingStage travel={travel} />
+              <Manipulator travel={travel} rotation={rotation} />
+              <HeatingStage travel={travel} rotation={rotation} />
             </SceneCtx.Provider>
 
             <gridHelper args={[3, 30, '#cbd5e1', '#e2e8f0']} position={[0.25, -0.48, 0]} />
