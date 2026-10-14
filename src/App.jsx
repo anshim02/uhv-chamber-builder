@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Html, Environment } from '@react-three/drei';
 import * as THREE from 'three';
@@ -16,7 +16,9 @@ const CF = {
   CF100: { od: 0.152, tube: 0.1016, t: 0.0198, bolts: 16, bc: 0.1303, hole: 0.0084 },
 };
 
-const DIM = {
+// Defaults. The values you edit in the "Dimensions" tab override these live;
+// use "Copy values" there to paste a design back in here.
+const DEFAULT_DIM = {
   mainFace: 0.127,           // CF100 4-way cross, centre-to-face
   topReducer: 0.05,          // CF100 -> CF63 conical reducer length
   smallFace: 0.076,          // CF63 (~60 mm) 6-way cross, centre-to-face
@@ -54,25 +56,100 @@ const DIM = {
   sampleFromTip: 0.02,       // sample plate centre, measured from the stage tip
 };
 
-// Derived positions along the main (x) axis
-const X = {
-  teeStart: DIM.mainFace + DIM.rightReducer,
-  manipFlange: DIM.mainFace + DIM.rightReducer + DIM.tee,
-  gateMid: -DIM.mainFace - DIM.gateValve / 2,
-  gateEnd: -DIM.mainFace - DIM.gateValve,
-  loadlockEnd: -DIM.mainFace - DIM.gateValve - DIM.loadlock,
-};
-X.teeMid = (X.teeStart + X.manipFlange) / 2;
-const SMALL_CROSS_Y = DIM.mainFace + DIM.topReducer + DIM.smallFace;
+// Live dimensions + everything derived from them. The app calls applyDims() at the
+// top of every render, before any scene component reads these.
+let DIM, X, SMALL_CROSS_Y, EVAP_TILT_DEG, TRAVEL_TO_CENTRE;
 
-// Evaporator tilt from vertical so each port axis passes through DIM.evapFocus
-const EVAP_TILT_DEG =
-  (Math.atan2(DIM.evapPortRadius, DIM.mainFace + DIM.bottomFlange + DIM.evapFocus[1]) * 180) / Math.PI;
+function applyDims(d) {
+  DIM = d;
+  // Positions along the main (x) axis
+  X = {
+    teeStart: d.mainFace + d.rightReducer,
+    manipFlange: d.mainFace + d.rightReducer + d.tee,
+    gateMid: -d.mainFace - d.gateValve / 2,
+    gateEnd: -d.mainFace - d.gateValve,
+    loadlockEnd: -d.mainFace - d.gateValve - d.loadlock,
+  };
+  X.teeMid = (X.teeStart + X.manipFlange) / 2;
+  SMALL_CROSS_Y = d.mainFace + d.topReducer + d.smallFace;
+  // Evaporator tilt from vertical so each port axis passes through d.evapFocus
+  EVAP_TILT_DEG = (Math.atan2(d.evapPortRadius, d.mainFace + d.bottomFlange + d.evapFocus[1]) * 180) / Math.PI;
+  TRAVEL_TO_CENTRE = X.manipFlange - d.shaftProtrude - d.stageLen + d.sampleFromTip;
+}
+applyDims(DEFAULT_DIM);
 
 // Manipulator kinematics: the flange is bolted down, only the shaft + carriage move.
 const shaftEndAt = (travel) => X.manipFlange - DIM.shaftProtrude - travel;
 const sampleXAt = (travel) => shaftEndAt(travel) - DIM.stageLen + DIM.sampleFromTip;
-const TRAVEL_TO_CENTRE = X.manipFlange - DIM.shaftProtrude - DIM.stageLen + DIM.sampleFromTip;
+
+// Editable fields for the Dimensions tab: [key, label, unit]. Lengths are shown in mm.
+const EDITABLE = [
+  ['Manipulator', [
+    ['manipTotal', 'Overall length', 'mm'],
+    ['manipStroke', 'Stroke', 'mm'],
+    ['rotationLimitDeg', 'Rotation limit (±)', 'deg'],
+    ['manipTubeOD', 'Outer tube Ø', 'mm'],
+    ['carriageLen', 'Carriage length', 'mm'],
+    ['carriageRetracted', 'Carriage centre at 0 travel', 'mm'],
+    ['shaftOD', 'Shaft Ø', 'mm'],
+    ['shaftProtrude', 'Shaft past flange at 0 travel', 'mm'],
+  ]],
+  ['Heating stage', [
+    ['stageLen', 'Stage length', 'mm'],
+    ['sampleFromTip', 'Sample centre from tip', 'mm'],
+  ]],
+  ['Right-side mounting', [
+    ['rightReducer', 'CF100→CF40 reducer', 'mm'],
+    ['tee', 'Feedthrough tee length', 'mm'],
+    ['teeSide', 'Side port height', 'mm'],
+  ]],
+  ['Chamber', [
+    ['mainFace', '100 mm cross centre-to-face', 'mm'],
+    ['gateValve', 'Gate valve length', 'mm'],
+    ['loadlock', 'Load lock length', 'mm'],
+    ['topReducer', 'Top reducer length', 'mm'],
+    ['smallFace', '60 mm cross centre-to-face', 'mm'],
+    ['evapPortRadius', 'Evaporator port offset', 'mm'],
+  ]],
+];
+
+const STORAGE_KEY = 'uhv-dims';
+
+function loadDims() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (saved && typeof saved === 'object') return { ...DEFAULT_DIM, ...saved };
+  } catch {}
+  return DEFAULT_DIM;
+}
+
+// Geometry sanity checks shown in the Dimensions tab
+function designChecks() {
+  const c = [];
+  const s = DIM.manipStroke;
+  const carriageFar = DIM.carriageRetracted + DIM.carriageLen / 2;
+  const carriageNear = DIM.carriageRetracted - s - DIM.carriageLen / 2;
+  c.push(carriageFar <= DIM.manipTotal - 0.005
+    ? { ok: true, text: `Carriage fits at 0 travel (${cm(DIM.manipTotal - carriageFar)} cm spare)` }
+    : { ok: false, text: `Carriage runs off the tube end by ${cm(carriageFar - DIM.manipTotal + 0.005)} cm at 0 travel` });
+  c.push(carriageNear >= CF.CF40.t
+    ? { ok: true, text: `Carriage clears the flange at full stroke (${cm(carriageNear - CF.CF40.t)} cm spare)` }
+    : { ok: false, text: `Carriage hits the flange at full stroke (${cm(CF.CF40.t - carriageNear)} cm short)` });
+  c.push(TRAVEL_TO_CENTRE >= 0 && TRAVEL_TO_CENTRE <= s
+    ? { ok: true, text: `Sample reaches cross centre at ${cm(TRAVEL_TO_CENTRE)} cm travel` }
+    : { ok: false, text: TRAVEL_TO_CENTRE < 0
+        ? `Sample is already ${cm(-TRAVEL_TO_CENTRE)} cm past the centre at 0 travel`
+        : `Stroke is ${cm(TRAVEL_TO_CENTRE - s)} cm too short to reach the cross centre` });
+  const reach = X.gateEnd - sampleXAt(s);
+  c.push(reach >= 0
+    ? { ok: true, text: `At full stroke the sample is ${cm(reach)} cm into the load lock` }
+    : { ok: false, text: `At full stroke the sample stops ${cm(-reach)} cm short of the load lock` });
+  const retractedFront = shaftEndAt(0) - DIM.stageLen;
+  c.push(retractedFront > -DIM.mainFace
+    ? { ok: true, text: 'Gate valve can close with the stage retracted' }
+    : { ok: false, text: 'Retracted stage still blocks the gate valve' });
+  return c;
+}
 
 function zoneOf(x) {
   if (x > X.manipFlange) return 'Inside manipulator';
@@ -87,9 +164,9 @@ function zoneOf(x) {
 const cm = (m) => (m * 100).toFixed(1);
 
 /* ==================================================================
- * PART CATALOGUE (sidebar text)
+ * PART CATALOGUE (sidebar text) — a function so specs track live dimensions
  * ================================================================== */
-const PARTS = {
+const getParts = () => ({
   mainCross: {
     name: '100 mm 4-way cross',
     desc: 'Main chamber body. Bottom: evaporators. Top: reducer to 60 mm 6-way cross. Left: gate valve to load lock. Right: manipulator.',
@@ -162,7 +239,7 @@ const PARTS = {
     desc: 'Heating stage taken from the old manipulator and fixed to the shaft tip. Ceramic-beaded wires coil around the shaft back to the tee feedthrough so they can follow the stroke.',
     specs: [`Stage length: ${cm(DIM.stageLen)} cm`, 'Sample faces down (towards evaporators)'],
   },
-};
+});
 
 /* ==================================================================
  * SCENE PRIMITIVES
@@ -564,7 +641,7 @@ function StageWires({ shaftEnd, rotation }) {
       }
       return new THREE.CatmullRomCurve3(pts);
     });
-  }, [shaftEnd, rotation]);
+  }, [shaftEnd, rotation, X.teeMid, DIM.teeSide]);
 
   return curves.map((c, i) => (
     <mesh key={i}>
@@ -608,14 +685,29 @@ function HeatingStage({ travel, rotation }) {
  * APP
  * ================================================================== */
 export default function UHVBuilder() {
-  const [travel, setTravel] = useState(0); // metres, 0 = fully retracted
-  const [rotDeg, setRotDeg] = useState(0); // 0 = sample facing down at the evaporators
+  const [dims, setDims] = useState(loadDims);
+  applyDims(dims); // must run before anything below reads DIM / X
+
+  const [travelRaw, setTravel] = useState(0); // metres, 0 = fully retracted
+  const [rotDegRaw, setRotDeg] = useState(0); // 0 = sample facing down at the evaporators
   const [selected, setSelected] = useState('mainCross');
   const [hovered, setHovered] = useState(null);
   const [gateOpen, setGateOpen] = useState(true);
   const [xray, setXray] = useState(true);
   const [labels, setLabels] = useState(true);
   const [showFrame, setShowFrame] = useState(true);
+  const [tab, setTab] = useState('controls');
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dims)); } catch {}
+  }, [dims]);
+
+  // Keep motion inside the (possibly just edited) limits
+  const travel = Math.min(travelRaw, DIM.manipStroke);
+  const rotDeg = Math.max(-DIM.rotationLimitDeg, Math.min(DIM.rotationLimitDeg, rotDegRaw));
+  const parts = getParts();
+  const checks = designChecks();
+  const failing = checks.filter((c) => !c.ok).length;
 
   const sampleX = sampleXAt(travel);
   const stageFront = shaftEndAt(travel) - DIM.stageLen;
@@ -627,7 +719,7 @@ export default function UHVBuilder() {
   // Sample normal starts at -y; rotating about x gives y-component -cos(θ)
   const facingY = -Math.cos(rotation);
   const facing = facingY < -0.7 ? 'Down → evaporators' : facingY > 0.7 ? 'Up → pyrometer' : 'Sideways';
-  const info = PARTS[selected];
+  const info = parts[selected];
 
   const ctx = { selected, hovered, xray, labels, setSelected, setHovered };
 
@@ -650,6 +742,17 @@ export default function UHVBuilder() {
 
       <div style={S.body}>
         <aside style={S.sidebar}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+            <Toggle on={tab === 'controls'} onClick={() => setTab('controls')}>Controls</Toggle>
+            <Toggle on={tab === 'dims'} onClick={() => setTab('dims')}>
+              Dimensions{failing > 0 ? ` (${failing}⚠)` : ''}
+            </Toggle>
+          </div>
+
+          {tab === 'dims' ? (
+            <DimensionsPanel dims={dims} setDims={setDims} checks={checks} />
+          ) : (
+          <>
           <h3 style={S.h3}>Stroke</h3>
           <div style={S.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -664,7 +767,7 @@ export default function UHVBuilder() {
             />
             <div style={{ display: 'flex', gap: 6 }}>
               <button style={S.btn} onClick={() => setTravel(0)}>Retract</button>
-              <button style={S.btn} onClick={() => setTravel(TRAVEL_TO_CENTRE)}>To centre</button>
+              <button style={S.btn} onClick={() => setTravel(Math.max(0, TRAVEL_TO_CENTRE))}>To centre</button>
               <button style={S.btn} onClick={() => setTravel(DIM.manipStroke)}>Full</button>
             </div>
           </div>
@@ -705,7 +808,7 @@ export default function UHVBuilder() {
 
           <h3 style={{ ...S.h3, marginTop: 20 }}>Components</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {Object.entries(PARTS).map(([id, p]) => (
+            {Object.entries(parts).map(([id, p]) => (
               <button
                 key={id}
                 onClick={() => setSelected(id)}
@@ -723,9 +826,8 @@ export default function UHVBuilder() {
               {info.specs.map((s) => <li key={s}>{s}</li>)}
             </ul>
           </div>
-          <p style={{ ...S.muted, marginTop: 12, lineHeight: 1.5 }}>
-            Dimensions are nominal catalogue values. Edit <code>DIM</code> at the top of App.jsx to match your parts.
-          </p>
+          </>
+          )}
         </aside>
 
         <main style={{ flex: 1, position: 'relative' }}>
@@ -777,6 +879,86 @@ function Row({ k, v }) {
   );
 }
 
+function DimensionsPanel({ dims, setDims, checks }) {
+  const [copied, setCopied] = useState(false);
+  const set = (key, value) => setDims((d) => ({ ...d, [key]: value }));
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(dims, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  return (
+    <>
+      <h3 style={S.h3}>Design checks</h3>
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        {checks.map((c) => (
+          <p key={c.text} style={{ margin: '3px 0', fontSize: 12, lineHeight: 1.4, color: c.ok ? '#15803d' : '#b91c1c', fontWeight: c.ok ? 400 : 600 }}>
+            {c.ok ? '✓' : '✗'} {c.text}
+          </p>
+        ))}
+      </div>
+
+      {EDITABLE.map(([group, fields]) => (
+        <div key={group} style={{ marginBottom: 16 }}>
+          <h3 style={S.h3}>{group}</h3>
+          {fields.map(([key, label, unit]) => (
+            <NumField
+              key={key}
+              label={label}
+              unit={unit}
+              value={dims[key]}
+              changed={dims[key] !== DEFAULT_DIM[key]}
+              onCommit={(v) => set(key, v)}
+            />
+          ))}
+        </div>
+      ))}
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button style={S.btn} onClick={() => setDims(DEFAULT_DIM)}>Reset all</button>
+        <button style={S.btn} onClick={copy}>{copied ? 'Copied ✓' : 'Copy values'}</button>
+      </div>
+      <p style={{ ...S.muted, marginTop: 10, lineHeight: 1.5 }}>
+        Edits are saved in this browser. "Copy values" gives JSON (in metres) you can paste into <code>DEFAULT_DIM</code> in App.jsx.
+      </p>
+    </>
+  );
+}
+
+// Number input in display units (mm or deg); keeps a draft so you can clear and retype
+function NumField({ label, unit, value, changed, onCommit }) {
+  const toDisplay = (v) => (unit === 'mm' ? +(v * 1000).toFixed(1) : v);
+  const [draft, setDraft] = useState(String(toDisplay(value)));
+  useEffect(() => setDraft(String(toDisplay(value))), [value]);
+
+  const onChange = (e) => {
+    setDraft(e.target.value);
+    const n = parseFloat(e.target.value);
+    // Zero-length parts break the geometry, so only positive values are applied
+    if (Number.isFinite(n) && n > 0) onCommit(unit === 'mm' ? n / 1000 : n);
+  };
+
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 0', fontSize: 12 }}>
+      <span style={{ color: changed ? '#1d4ed8' : '#475569', fontWeight: changed ? 600 : 400 }}>{label}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="number" min={0} step={unit === 'mm' ? 1 : 5}
+          value={draft}
+          onChange={onChange}
+          onBlur={() => setDraft(String(toDisplay(value)))}
+          style={S.numInput}
+        />
+        <span style={{ color: '#94a3b8', width: 24 }}>{unit}</span>
+      </span>
+    </label>
+  );
+}
+
 /* ==================================================================
  * STYLES
  * ================================================================== */
@@ -797,5 +979,6 @@ const S = {
   listItem: { textAlign: 'left', fontSize: 13, padding: '7px 10px', borderRadius: 6, border: '1px solid transparent', background: 'transparent', color: '#334155', cursor: 'pointer' },
   listItemActive: { background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8', fontWeight: 600 },
   label: { background: '#fff', padding: '3px 8px', borderRadius: 6, boxShadow: '0 2px 4px rgb(0 0 0 / 0.08)', border: '1px solid #cbd5e1', fontSize: 11, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap' },
+  numInput: { width: 72, fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid #cbd5e1', textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
   labelAccent: { background: '#fffbeb', borderColor: '#f59e0b', color: '#92400e' },
 };
